@@ -121,7 +121,7 @@ const App: React.FC = () => {
                 </svg>
               </div>
               <span className="font-bold text-lg tracking-tight text-slate-800">
-                北区人员<span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500 ml-1">智能看板</span>
+                北区客户部<span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500 ml-1">智能看板</span>
               </span>
             </div>
             

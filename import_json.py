@@ -1,7 +1,11 @@
 import json
+import os
+import shutil
 import sqlite3
 
-DB_PATH = "hr.db"
+DB_PATH = "public/hr.db"
+DIST_DB_PATH = "dist/hr.db"
+SYNC_DIST = True
 JSON_PATH = "people.json"
 
 # 文本等级 → 数值映射
@@ -127,6 +131,8 @@ def main():
 
     conn.commit()
     conn.close()
+    if SYNC_DIST and os.path.exists(DIST_DB_PATH):
+        shutil.copyfile(DB_PATH, DIST_DB_PATH)
     print("✅ JSON 数据已全部导入 SQLite")
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Employee, AnalyzedEmployee } from './types';
-import { calculateEmployeeScore } from './utils/scoring';
+import { AnalyzedEmployee } from './types';
 import { analyzeEmployeeData } from './services/geminiService';
+import { loadEmployeesFromDatabase } from './services/sqliteService';
 import EmployeeCard from './components/EmployeeCard';
 import EmployeeDetailModal from './components/EmployeeDetailModal';
 import Dashboard from './components/Dashboard';
@@ -9,9 +9,11 @@ import ApiKeyModal from './components/ApiKeyModal';
 
 const App: React.FC = () => {
   const [employees, setEmployees] = useState<AnalyzedEmployee[]>([]);
-  const [view, setView] = useState<'upload' | 'dashboard' | 'cards'>('upload');
+  const [view, setView] = useState<'dashboard' | 'cards'>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<AnalyzedEmployee | null>(null);
+  const [isLoadingDb, setIsLoadingDb] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   // API Key State
   const [apiKey, setApiKey] = useState<string>('');
@@ -35,45 +37,27 @@ const App: React.FC = () => {
       setShowKeyModal(false);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        let rawData: Employee[] = [];
-        try {
-            rawData = JSON.parse(text);
-        } catch (err) {
-            try { rawData = JSON.parse(`[${text}]`); } 
-            catch (err2) {
-                console.error("Failed to parse JSON", err2);
-                alert("JSON 格式错误。请确保文件包含有效的员工 JSON 数组。");
-                return;
-            }
-        }
-        
-        if (!Array.isArray(rawData)) rawData = [rawData as unknown as Employee];
-
-        // Instant scoring calculation (No AI wait)
-        const processedData: AnalyzedEmployee[] = rawData.map((emp, index) => ({
-            ...emp,
-            序号: emp.序号 || index + 1,
-            calculatedScore: calculateEmployeeScore(emp)
-        }));
-
-        setEmployees(processedData);
-        setView('dashboard');
-        setSearchTerm(''); 
-      } catch (error) {
-        console.error("Error processing file", error);
-        alert("处理文件时出错。");
-      }
-    };
-    reader.readAsText(file);
+  const loadEmployees = async () => {
+    setIsLoadingDb(true);
+    setLoadError(null);
+    try {
+      const dbUrl = import.meta.env.VITE_SQLITE_DB_URL;
+      const data = await loadEmployeesFromDatabase(dbUrl || undefined);
+      setEmployees(data);
+      setView('dashboard');
+      setSearchTerm('');
+    } catch (error) {
+      console.error("Failed to load database", error);
+      setLoadError(error instanceof Error ? error.message : '无法加载数据库');
+      setEmployees([]);
+    } finally {
+      setIsLoadingDb(false);
+    }
   };
+
+  useEffect(() => {
+    loadEmployees();
+  }, []);
 
   const handleAnalyzeEmployee = async (emp: AnalyzedEmployee) => {
     // Check for API Key
@@ -142,10 +126,10 @@ const App: React.FC = () => {
                     </button>
                     <div className="w-px h-4 bg-slate-300 mx-1"></div>
                     <button
-                    onClick={() => { setEmployees([]); setView('upload'); setSearchTerm(''); }}
+                    onClick={() => { setSelectedEmployee(null); loadEmployees(); }}
                     className="px-3 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-red-500 transition-colors"
                     >
-                    重置
+                    重载数据
                     </button>
                 </div>
                 )}
@@ -169,41 +153,78 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-28">
-        
-        {view === 'upload' && (
+        {isLoadingDb && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in-up">
             <div className="bg-white p-12 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 max-w-2xl w-full text-center relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500"></div>
               
               <div className="mb-8 mx-auto bg-gradient-to-br from-emerald-50 to-teal-50 w-24 h-24 rounded-3xl flex items-center justify-center shadow-inner border border-emerald-100">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
+                <div className="h-10 w-10 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin"></div>
               </div>
               
-              <h1 className="text-3xl font-bold text-slate-800 mb-3 tracking-tight">上传人员数据</h1>
-              <p className="text-slate-500 mb-10 max-w-md mx-auto leading-relaxed">
-                请上传包含北区人员记录的 JSON 数据文件。系统将自动进行多维能力评估与 AI 智能画像分析。
+              <h1 className="text-3xl font-bold text-slate-800 mb-3 tracking-tight">正在加载数据库</h1>
+              <p className="text-slate-500 mb-4 max-w-md mx-auto leading-relaxed">
+                正从 SQLite 数据库读取人员记录和能力评分，请稍候...
               </p>
-              
-              <label className="group block w-full cursor-pointer relative">
-                  <input type="file" className="hidden" accept=".json" onChange={handleFileUpload} />
-                  <div className="w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl group-hover:border-emerald-400 group-hover:bg-emerald-50/30 transition-all duration-300 flex flex-col items-center justify-center gap-2">
-                    <span className="text-sm font-semibold text-slate-500 group-hover:text-emerald-600 transition-colors">
-                        点击或拖拽上传 JSON 文件
-                    </span>
-                    <span className="text-xs text-slate-400 group-hover:text-emerald-500/70">支持 .json 格式</span>
-                  </div>
-              </label>
             </div>
           </div>
         )}
 
-        {view === 'dashboard' && employees.length > 0 && (
+        {!isLoadingDb && loadError && (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in-up">
+            <div className="bg-white p-12 rounded-3xl shadow-xl shadow-red-100/40 border border-red-100 max-w-2xl w-full text-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-400 via-orange-400 to-amber-400"></div>
+              
+              <div className="mb-8 mx-auto bg-red-50 w-24 h-24 rounded-3xl flex items-center justify-center shadow-inner border border-red-100">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              
+              <h1 className="text-3xl font-bold text-slate-800 mb-3 tracking-tight">数据库加载失败</h1>
+              <p className="text-slate-500 mb-8 max-w-md mx-auto leading-relaxed">
+                {loadError}
+              </p>
+              <button
+                onClick={loadEmployees}
+                className="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-500/30 hover:-translate-y-0.5 transition-all"
+              >
+                重试加载
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isLoadingDb && !loadError && employees.length === 0 && (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in-up">
+            <div className="bg-white p-12 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 max-w-2xl w-full text-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 via-emerald-400 to-teal-400"></div>
+              
+              <div className="mb-8 mx-auto bg-slate-50 w-24 h-24 rounded-3xl flex items-center justify-center shadow-inner border border-slate-100">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.104 0-2 .896-2 2m2-2c1.104 0 2 .896 2 2m-2-2v.01M12 14h.01M7 21h10a2 2 0 002-2V9.414a2 2 0 00-.586-1.414l-4.414-4.414A2 2 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+              </div>
+              
+              <h1 className="text-3xl font-bold text-slate-800 mb-3 tracking-tight">数据库暂无人员数据</h1>
+              <p className="text-slate-500 mb-8 max-w-md mx-auto leading-relaxed">
+                请确认 hr.db 中有人员记录，或点击下方按钮重新加载。
+              </p>
+              <button
+                onClick={loadEmployees}
+                className="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-500/30 hover:-translate-y-0.5 transition-all"
+              >
+                重新加载
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isLoadingDb && !loadError && view === 'dashboard' && employees.length > 0 && (
           <Dashboard employees={employees} />
         )}
 
-        {view === 'cards' && employees.length > 0 && (
+        {!isLoadingDb && !loadError && view === 'cards' && employees.length > 0 && (
           <div className="space-y-8 animate-fade-in">
              <div className="max-w-xl mx-auto relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
